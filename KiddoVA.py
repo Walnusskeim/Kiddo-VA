@@ -56,6 +56,20 @@ def sync_alarms_with_server(alarms):
         return False
 
 
+def get_alarms_from_server():
+    url = "http://10.0.0.69:6969/alarms"
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.json().get("alarms", [])
+        else:
+            print("Fehler beim Abrufen der Wecker:", response.status_code)
+            return None
+    except Exception as e:
+        print("Verbindung fehlgeschlagen:", e)
+        return None
+
+
 class KiddoVA(App):
     alarms = ListProperty([])
 
@@ -63,6 +77,10 @@ class KiddoVA(App):
         Window.clearcolor = (0.1, 0.1, 0.1, 1)
         # Load saved alarms if any
         self.load_alarms()
+
+        # Check for server alarms every 5 seconds
+        Clock.schedule_interval(self.check_server_alarms, 5)
+
         return MyLayout()
 
     def load_alarms(self):
@@ -74,9 +92,31 @@ class KiddoVA(App):
             # If no saved alarms, initialize with empty list
             self.alarms = []
 
-    def save_alarms(self):
+    def check_server_alarms(self):
+        server_alarms = get_alarms_from_server()
+        if server_alarms is not None:
+            # Check if the server alarms are different from local alarms
+            updated = False
+            if len(server_alarms) == len(self.alarms):
+                for i, server_alarm in enumerate(server_alarms):
+                    if (server_alarm.get("active") != self.alarms[i].active or
+                        server_alarm.get("time") != self.alarms[i].time):
+                        updated = True
+                        break
+            else:
+                updated = True
+
+            if updated:
+                self.alarms = [AlarmItem(alarm["time"], alarm["active"]) for alarm in server_alarms]
+                self.save_alarms_locally()
+                Clock.schedule_once(lambda dt: self.update_alarm_widgets())
+
+    def save_alarms_locally(self):
         with open("alarms.json", "w") as f:
             json.dump([alarm.to_dict() for alarm in self.alarms], f)
+
+    def save_alarms(self):
+        self.save_alarms_locally()
         sync_alarms_with_server(self.alarms)
 
     def set_alarm(self, time_text):
@@ -92,17 +132,17 @@ class KiddoVA(App):
         self.save_alarms()
 
         # Update UI
-        Clock.schedule_once(self.update_alarm_widgets)
+        Clock.schedule_once(lambda dt: self.update_alarm_widgets())
 
-    def update_alarm_widgets(self):
+    def update_alarm_widgets(self,):
         alarm_container = self.root.ids.alarm_container
         alarm_container.clear_widgets()
 
-        for i, alarm in enumerate(self.alarms):
+        for i, alarm in enumerate(reversed(self.alarms)):
             alarm_widget = Factory.AlarmWidget()
             alarm_widget.alarm_time = alarm.time
             alarm_widget.active = alarm.active
-            alarm_widget.index = i
+            alarm_widget.index = len(self.alarms) - 1 - i
             alarm_container.add_widget(alarm_widget)
 
     def toggle_alarm(self, index, active):
@@ -114,7 +154,23 @@ class KiddoVA(App):
         if 0 <= index < len(self.alarms):
             self.alarms.pop(index)
             self.save_alarms()
-            Clock.schedule_once(self.update_alarm_widgets)
+            # If list is empty, file is deleted/overwritten with empty list
+            if not self.alarms:
+                self.clear_alarm_file()
+            Clock.schedule_once(lambda dt: self.update_alarm_widgets())
+
+    @staticmethod
+    def clear_alarm_file():
+        try:
+            # Write an empty list to the file
+            with open("alarms.json", "w") as f:
+                json.dump([], f)
+
+            # Send an empty list to the server
+            requests.post("http://10.0.0.69:6969/alarms", json={"alarms": []})
+            print("Alle Alarme wurden gelöscht")
+        except Exception as e:
+            print(f"Fehler beim Löschen der Alarmdatei: {e}")
 
 
 if __name__ == '__main__':
