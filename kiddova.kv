@@ -18,8 +18,13 @@
         Button:
             text: 'Set Alarm'
             size_hint: (0.3, 0.2)
-            pos_hint: {'x': 0.35, 'y': 0.2}
+            pos_hint: {'x': 0.55, 'y': 0.2}
             on_press: app.set_alarm(time.text)
+            on_release: root.dismiss()
+        Button:
+            text: 'Cancel'
+            size_hint: (0.3, 0.2)
+            pos_hint: {'x': 0.15, 'y': 0.2}
             on_release: root.dismiss()
 
 <MyLayout>
